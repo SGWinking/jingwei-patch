@@ -1,11 +1,25 @@
-# 大云壁画工具箱 · 精卫 Jingwei —— 统一启动脚本
+﻿# 大云壁画工具箱 · 精卫 Jingwei —— 统一启动脚本
 # 规范见 SERIES-SPEC v1.0 §6：定位 Python → 检查依赖 → 启动 → 健康检查 → 开浏览器
 #
-# 本脚本由 run.bat 双击调用，也可以直接在 PowerShell 里运行：
-#   .\run.ps1
+# 【重要】本文件必须保存为 UTF-8 **带 BOM**。
+#   Windows PowerShell 5.1（run.bat 调用的就是它）在没有 BOM 时
+#   会按 GBK 解码 .ps1，中文全部变乱码，而且会直接造成语法错误
+#   ——脚本根本跑不起来。改这个文件之后务必确认 BOM 还在。
+#
+# 由 run.bat 双击调用，也可以直接在 PowerShell 里运行：.\run.ps1
+#   .\run.ps1              正常启动，并自动打开浏览器
+#   .\run.ps1 -NoBrowser   只起服务、不开浏览器（自动化测试用）
+
+param(
+    [switch]$NoBrowser
+)
 
 $ErrorActionPreference = "Stop"
+
+# 单独运行本脚本（不经过 run.bat）时也要把控制台切到 UTF-8
+try { chcp 65001 | Out-Null } catch { }
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+try { $OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
@@ -39,7 +53,7 @@ if (-not $pythonExe) {
     Write-Host ""
     Write-Host "  没有找到 Python。请先安装 Python 3.9 或更高版本："
     Write-Host "    https://www.python.org/downloads/"
-    Write-Host "  安装时务必勾选 “Add python.exe to PATH”，然后重新双击 run.bat。"
+    Write-Host "  安装时务必勾选「Add python.exe to PATH」，然后重新双击 run.bat。"
     Write-Host ""
     exit 1
 }
@@ -53,18 +67,18 @@ if ($verText) {
 }
 if (-not $verOk) {
     Write-Host "失败"
-    Write-Host ("  需要 Python 3.9 或更高版本（检测到 “{0}”）。" -f $verText)
+    Write-Host ("  需要 Python 3.9 或更高版本（检测到「{0}」）。" -f $verText)
     exit 1
 }
 Write-Host ("OK   Python {0}" -f $verText.Trim())
 
-# ---------------------------------------------------------------- 已在运行则直接打开
+# ------------------------------------------------- 已经在跑就不再启动第二个
 try {
     $existing = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 2
     if ($existing.StatusCode -eq 200) {
         Write-Host ""
         Write-Host ("  检测到 {0} 已经在运行，直接打开页面。" -f $ToolCN)
-        Start-Process $AppUrl
+        if (-not $NoBrowser) { Start-Process $AppUrl }
         exit 0
     }
 } catch { }
@@ -75,7 +89,7 @@ Write-Host "[2/4] 检查依赖 ... " -NoNewline
 if ($LASTEXITCODE -ne 0) {
     Write-Host "缺少依赖"
     Write-Host ""
-    Write-Host ("  {0} 需要 Pillow、numpy、opencv-python。" -f $ToolCN)
+    Write-Host ("  {0} 需要 Pillow、numpy、opencv-python 三个库。" -f $ToolCN)
     $answer = Read-Host "  现在自动安装吗？(Y/N)"
     if ($answer -match '^[Yy]') {
         Write-Host "  正在安装，第一次可能要几分钟…"
@@ -131,9 +145,13 @@ if (-not $ready) {
 Write-Host "OK"
 
 # ---------------------------------------------------------------- [4/4] 浏览器
-Write-Host "[4/4] 打开浏览器 ... " -NoNewline
-Start-Process $AppUrl
-Write-Host "OK"
+if ($NoBrowser) {
+    Write-Host "[4/4] 跳过打开浏览器（-NoBrowser）"
+} else {
+    Write-Host "[4/4] 打开浏览器 ... " -NoNewline
+    Start-Process $AppUrl
+    Write-Host "OK"
+}
 Write-Host ""
 Write-Host ("  {0} 正在运行。按 Ctrl+C 或直接关闭本窗口即可停止。" -f $ToolCN)
 Write-Host ""
