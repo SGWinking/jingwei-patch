@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>精卫 Jingwei · 局部修复回贴 · 大云壁画工具箱</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ============================ 系列页头 ============================ -->
+    <header class="series-header">
+      <div class="series-brand">
+        <img src="/assets/logo.svg" alt="精卫" />
+        <div class="names">
+          <div class="series-name">大云壁画工具箱</div>
+          <div class="tool-name">
+            精卫 <span class="en">Jingwei</span>
+            <span class="ver" id="verLabel">v1.0.0</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" id="navTabs">
+        <button class="nav-tab active" data-page="align">回贴定位</button>
+        <button class="nav-tab" data-page="compare">对比导出</button>
+        <button class="nav-tab" data-page="crop">区域裁剪</button>
+      </nav>
+
+      <div class="series-meta">
+        <span class="status-dot" id="healthDot"></span>
+        <span id="healthText">连接中…</span>
+        <span class="port" id="portLabel">:8786</span>
+      </div>
+    </header>
+
+    <!-- ============================ 回贴定位 ============================ -->
+    <section class="page" id="page-align">
+      <div class="layout">
+        <aside class="card">
+          <div class="card-head">
+            <div class="card-title">输入</div>
+            <div class="card-sub">把 AI 修复好的局部图丢进来，工具自动找回它在原大图中的位置与缩放。</div>
+          </div>
+          <div class="card-body">
+            <div class="stack">
+              <div class="drop" id="dropLarge" tabindex="0" role="button" aria-label="选择原始大图">
+                <div class="label">原始大图</div>
+                <div class="hint">PNG / JPG / TIF，保持原始分辨率</div>
+                <div class="filename" id="largeName">未选择</div>
+                <input type="file" id="largeInput" accept="image/*" hidden />
+              </div>
+
+              <div class="drop" id="dropPatch" tabindex="0" role="button" aria-label="选择局部修复图">
+                <div class="label">局部修复图</div>
+                <div class="hint">AI 修复后的局部，可被放大或缩小过</div>
+                <div class="filename" id="patchName">未选择</div>
+                <input type="file" id="patchInput" accept="image/*" hidden />
+              </div>
+
+              <div class="section-label">匹配参数</div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label for="searchLong">大图搜索长边 (px)</label>
+                  <input id="searchLong" type="number" min="1024" max="8192" step="64" value="4000" />
+                </div>
+                <div class="field">
+                  <label for="detectLong">补丁检测长边 (px)</label>
+                  <input id="detectLong" type="number" min="800" max="8192" step="64" value="2600" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="featherPx">羽化像素</label>
+                <input id="featherPx" type="number" min="1" max="400" step="1" value="40" />
+                <div class="hint-small">贴回时接缝的过渡半径，越大越柔和。</div>
+              </div>
+
+              <div class="section-label">输出</div>
+
+              <div class="field">
+                <label for="outputDir">导出目录</label>
+                <div class="dir-row">
+                  <input id="outputDir" type="text" placeholder="留空则用工具内的 exports 目录" />
+                  <button type="button" id="browseBtn" class="btn-ghost small">浏览…</button>
+                </div>
+                <div class="hint-small">每次运行会在此目录下建一个时间戳子目录。</div>
+              </div>
+
+              <div class="field">
+                <label for="exportLong">导出长边 (px)</label>
+                <input id="exportLong" type="number" min="0" max="24000" step="50" value="0" />
+                <div class="hint-small">0 = 原始分辨率；填 3000 则导出图统一缩到长边 3000。</div>
+              </div>
+
+              <button id="runBtn" class="btn-primary">开始自动对齐</button>
+              <div id="status" class="status">等待输入。</div>
+              <div class="saved-row" id="savedRow" hidden>
+                <span class="label">已保存至</span><code id="savedPath">-</code>
+              </div>
+
+              <div class="hint-list">
+                <strong>说明</strong>
+                <ul>
+                  <li>只估计「平移 + 等比缩放」；旋转小于 6° 时自动按无旋转处理。</li>
+                  <li>修复图若被 AI 大幅改写，请保留一圈原始边缘纹理，定位才稳。</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="history-block">
+              <div class="history-head">
+                <div class="card-title" style="font-size:12px;">历史记录</div>
+                <button type="button" class="btn-ghost small" id="refreshHistory">刷新</button>
+              </div>
+              <div class="history-list" id="historyList"></div>
+            </div>
+          </div>
+        </aside>
+
+        <main>
+          <div class="empty-state" id="alignEmpty">
+            <div>
+              <div class="mark">卫</div>
+              <div>选择两张图后，点「开始自动对齐」</div>
+            </div>
+          </div>
+
+          <div id="alignResults" class="result-grid" hidden>
+            <section class="card">
+              <div class="card-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                <div>
+                  <div class="card-title">定位结果</div>
+                  <div class="card-sub" id="runMeta">-</div>
+                </div>
+                <span class="pill" id="methodPill">-</span>
+              </div>
+              <div class="card-body">
+                <div class="preview-wrap"><img id="previewImg" class="preview-img" alt="定位预览" /></div>
+                <div class="download-pair">
+                  <a class="btn-ghost" id="downloadMergedHard" download>下载硬贴合并图</a>
+                  <a class="btn-ghost" id="downloadMergedFeather" download>下载羽化合并图</a>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><div class="card-title">匹配参数</div></div>
+              <div class="card-body">
+                <div class="metrics">
+                  <div class="metric"><div class="k">位置 X</div><div class="v" id="mx">-</div></div>
+                  <div class="metric"><div class="k">位置 Y</div><div class="v" id="my">-</div></div>
+                  <div class="metric"><div class="k">对应宽度</div><div class="v" id="mw">-</div></div>
+                  <div class="metric"><div class="k">对应高度</div><div class="v" id="mh">-</div></div>
+                  <div class="metric accent"><div class="k">缩放比例</div><div class="v" id="ms">-</div></div>
+                  <div class="metric"><div class="k">残留旋转 (°)</div><div class="v" id="mr">-</div></div>
+                  <div class="metric"><div class="k">特征内点</div><div class="v" id="mp">-</div></div>
+                  <div class="metric"><div class="k">用时 (s)</div><div class="v" id="mt">-</div></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+      <div class="footer-note">精卫 · 局部修复回贴 —— 大云壁画工具箱的第二个工具。原始大图与修复图都在本机处理，不上传任何服务器。</div>
+    </section>
+
+    <!-- ============================ 对比导出 ============================ -->
+    <section class="page" id="page-compare" hidden>
+      <div class="layout single">
+        <main>
+          <div class="empty-state" id="compareEmpty">
+            <div>
+              <div class="mark">比</div>
+              <div>先在「回贴定位」跑出一次结果，这里会自动出现同尺寸的对比图。</div>
+            </div>
+          </div>
+
+          <div id="compareResults" hidden>
+            <section class="card">
+              <div class="card-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                <div>
+                  <div class="card-title">同尺寸对比图</div>
+                  <div class="card-sub">两张图分辨率完全一致，可直接拖进 PPT 做前后对比。</div>
+                </div>
+                <span class="pill" id="compareDims">-</span>
+              </div>
+              <div class="card-body">
+                <div class="row-2">
+                  <div>
+                    <div class="col-title"><span>原图对应裁剪</span><span class="dim" id="srcDimA">-</span></div>
+                    <img id="srcImgA" class="compare-side-img" alt="原图对应裁剪" />
+                  </div>
+                  <div>
+                    <div class="col-title"><span>AI 修复对齐</span><span class="dim" id="alnDimA">-</span></div>
+                    <img id="alnImgA" class="compare-side-img" alt="AI 修复对齐" />
+                  </div>
+                </div>
+                <div class="download-pair">
+                  <a class="btn-ghost" id="dlSource" download>下载原图裁剪</a>
+                  <a class="btn-ghost" id="dlAligned" download>下载修复对齐图</a>
+                  <a class="btn-ghost" id="dlCompare" download>下载并排合成图</a>
+                  <a class="btn-ghost" id="dlZip" download>下载全部结果 ZIP</a>
+                  <span class="pill" id="exportPill" style="margin-left:auto;">原始分辨率</span>
+                </div>
+                <div class="saved-row" id="savedRow2" hidden>
+                  <span class="label">已保存至</span><code id="savedPath2">-</code>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ============================ 区域裁剪 ============================ -->
+    <section class="page" id="page-crop" hidden>
+      <div class="layout">
+        <aside class="card">
+          <div class="card-head">
+            <div class="card-title">区域裁剪</div>
+            <div class="card-sub">上传修复前 / 修复后两张同尺寸大图，在画布上拖框，两张图按同一坐标裁出并保存。</div>
+          </div>
+          <div class="card-body">
+            <div class="stack">
+              <div class="drop" id="dropBefore" tabindex="0" role="button" aria-label="选择修复前原图">
+                <div class="label">修复前（原图）</div>
+                <div class="hint">PNG / JPG</div>
+                <div class="filename" id="beforeName">未选择</div>
+                <input type="file" id="beforeInput" accept="image/*" hidden />
+              </div>
+
+              <div class="drop" id="dropAfter" tabindex="0" role="button" aria-label="选择修复后图片">
+                <div class="label">修复后</div>
+                <div class="hint">要求像素与「修复前」完全一致</div>
+                <div class="filename" id="afterName">未选择</div>
+                <input type="file" id="afterInput" accept="image/*" hidden />
+              </div>
+
+              <button id="loadPairBtn" class="btn-primary">加载预览</button>
+
+              <div class="field">
+                <label for="pairOutputDir">导出目录</label>
+                <div class="dir-row">
+                  <input id="pairOutputDir" type="text" placeholder="留空则用工具内的 exports 目录" />
+                  <button type="button" id="pairBrowseBtn" class="btn-ghost small">浏览…</button>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="pairNamePrefix">文件名前缀（可选）</label>
+                <input id="pairNamePrefix" type="text" placeholder="留空则只用时间戳" />
+                <div class="hint-small">导出为 <code>YYYYMMDD-HHMMSS[-前缀]/before.png</code> 与 <code>after.png</code></div>
+              </div>
+
+              <button id="cropPairBtn" class="btn-primary" disabled>裁剪并保存</button>
+              <div id="pairStatus" class="status">先加载两张图。</div>
+
+              <div class="hint-list">
+                <strong>操作</strong>
+                <ul>
+                  <li><b>左键拖</b> = 画框；<b>右键拖</b> 或 <b>空格 + 左键</b> = 平移。</li>
+                  <li><b>滚轮</b> = 以鼠标位置为中心缩放，可放大到像素级。</li>
+                  <li>红框可再次拖动微调；保存后红框自动清空，可继续选下一块。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <main>
+          <div class="empty-state" id="cropEmpty" style="min-height:60vh;">
+            <div>
+              <div class="mark">框</div>
+              <div>上传两张图并点「加载预览」后，会出现可缩放的选框画布</div>
+            </div>
+          </div>
+
+          <div id="cropResults" hidden>
+            <div class="viewer-toolbar">
+              <button type="button" class="btn-ghost small" id="zoomIn">＋ 放大</button>
+              <button type="button" class="btn-ghost small" id="zoomOut">－ 缩小</button>
+              <button type="button" class="btn-ghost small" id="zoomFit">适合窗口</button>
+              <button type="button" class="btn-ghost small" id="zoom100">1:1</button>
+              <button type="button" class="btn-ghost small" id="clearRect">清空选框</button>
+              <span class="zoom-pill" id="zoomLabel">100%</span>
+              <span class="zoom-pill" id="rectLabel">未选框</span>
+            </div>
+
+            <div class="viewer-stage" id="viewerStage">
+              <img id="viewerImg" class="viewer-img" alt="预览" />
+              <div class="viewer-rect" id="viewerRect" hidden></div>
+            </div>
+
+            <div class="viewer-info-row">
+              <span>原图尺寸 <code id="fullSizeTxt">-</code></span>
+              <span>选框（原图坐标）<code id="fullBoxTxt">-</code></span>
+              <span>选框尺寸 <code id="fullBoxSize">-</code></span>
+            </div>
+
+            <div class="pair-thumb-row">
+              <div class="pair-thumb"><img id="thumbBefore" alt="修复前预览" /><div class="cap">修复前（同坐标）</div></div>
+              <div class="pair-thumb"><img id="thumbAfter" alt="修复后预览" /><div class="cap">修复后（你正在画的）</div></div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

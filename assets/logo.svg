@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="精卫 Jingwei">
+  <title>精卫 · Jingwei</title>
+  <!-- 圆形朱文印：双翼衔石的精卫 -->
+  <circle cx="32" cy="32" r="30" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="28.5" fill="none" stroke="#b23a2c" stroke-width="2.4"/>
+  <path d="M12.5 42.5C20 26 27 20.5 32 28.5c5-8 12-2.5 19.5 14"
+        fill="none" stroke="#b23a2c" stroke-width="3.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="21.5" r="3.3" fill="#b23a2c"/>
+  <path d="M35.2 20.6l5.2 1.6-5.2 1.6z" fill="#b23a2c"/>
+  <circle cx="32" cy="45.5" r="4.6" fill="#b23a2c"/>
+</svg>

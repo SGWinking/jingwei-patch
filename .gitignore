@@ -1,0 +1,39 @@
+# 大云壁画工具箱 · 精卫 Jingwei
+# 仓库里只保留源码、文档和品牌资源；任何一次运行产生的东西都不进版本库。
+# 规范见 SERIES-SPEC v1.0 §1.2。
+
+# ---- 运行产物 ----
+runs/
+pair_sessions/
+exports/
+outputs/
+uploads/
+_previews/
+*.zip
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ---- 日志与临时文件 ----
+*.log
+*.err
+*.tmp
+server.out.log
+server.err.log
+
+# ---- 打包产物（可由 spec 重新生成）----
+build/
+dist/
+release/*.exe
+*-setup.exe
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
