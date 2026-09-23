@@ -191,4 +191,4 @@ Windows 中文环境下脚本文件的编码。
 | `0.4` | 前端页头显示 `v0.4`，含「回贴定位 / 对比导出 / 区域裁剪」三条工作流 |
 | `0.2` | `server_version = "LocalPatchAligner/0.2"`，更早的版本 |
 
-整理前的目录名为 `local-patch-aligner`，现更名为 `jingwei`。
+整理前的目录名为 `local-patch-aligner`，系列化后更名为 `jingwei-patch`。

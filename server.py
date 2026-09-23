@@ -53,7 +53,7 @@ RUNS = ROOT / "runs"
 PAIR_SESSIONS = ROOT / "pair_sessions"
 DEFAULT_OUTPUT_DIR = ROOT / "exports"
 
-APP_SLUG = "jingwei"
+APP_SLUG = "jingwei-patch"
 APP_NAME = "精卫"
 APP_NAME_EN = "Jingwei"
 APP_VERSION = "1.2.1"
