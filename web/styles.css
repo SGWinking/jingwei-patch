@@ -27,9 +27,11 @@
   --line-soft: #e6ebf0;
 
   /* ---- 主色（深朱红） ---- */
-  --accent:      #7f1d1d;
-  --accent-2:    #991b1b;
-  --accent-soft: #fff1f1;
+  --accent:      #1c4a72;
+  --accent-2:    #245c8c;
+  --accent-soft: #eef4fa;
+  --accent-line: #cfe0ee;
+  --accent-press: #14395a;
 
   /* ---- 状态色 ---- */
   --success:     #0f5132;
@@ -66,6 +68,59 @@
 
   --header-h: 76px;
 }
+
+/* ---------------------------------------------------------------- 深色主题
+   与「相柳网格」同一套深色色板（SERIES-SPEC §4.1 附录），
+   只有 accent 三兄弟换成精卫的石青蓝。页头可切换，选择记在 localStorage。 */
+
+body.dark {
+  color-scheme: dark;
+
+  --bg:        #171719;
+  --header:    #111113;
+  --panel:     #202124;
+  --panel-2:   #1d1e21;
+  --field:     #151619;
+  --field-2:   #111113;
+
+  --ink:       #f2f0e9;
+  --muted:     #a9a69d;
+  --line:      #383b42;
+  --line-soft: #2a2d33;
+
+  --accent:      #2a5f8f;
+  --accent-2:    #3474ab;
+  --accent-soft: #1a2430;
+  --accent-line: #2a3f52;
+  --accent-press: #22527a;
+
+  --success:     #6ee7a8;
+  --success-bg:  #14251b;
+  --danger:      #ff9a9a;
+  --danger-bg:   #2a1618;
+  --note:        #26231c;
+  --cream:       #d4d0c4;
+  --teal:        #2f9b8f;
+
+  --shadow: rgba(0, 0, 0, .32);
+}
+
+.theme-toggle {
+  height: 34px;
+  min-width: 64px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.theme-toggle:hover { background: #eef2f6; }
+body.dark .theme-toggle:hover { background: #26282d; }
 
 * { box-sizing: border-box; }
 
@@ -294,7 +349,7 @@ input::placeholder { color: #9aa4b2; }
 }
 
 .btn-primary:hover { background: var(--accent-2); }
-.btn-primary:active { background: #6b1414; }
+.btn-primary:active { background: var(--accent-press); }
 .btn-primary:disabled { background: #b9c2cc; color: #eef1f5; cursor: default; }
 
 .btn-ghost {
@@ -414,7 +469,7 @@ input::placeholder { color: #9aa4b2; }
 
 .metric .k { font-size: var(--fs-tiny); color: var(--muted); }
 .metric .v { font-size: 20px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.metric.accent { background: var(--accent-soft); border-color: #eccfcf; }
+.metric.accent { background: var(--accent-soft); border-color: var(--accent-line); }
 .metric.accent .k { color: var(--accent); }
 
 .pill {
@@ -427,7 +482,7 @@ input::placeholder { color: #9aa4b2; }
   font-weight: 700;
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid #eccfcf;
+  border: 1px solid var(--accent-line);
   white-space: nowrap;
 }
 
@@ -488,7 +543,7 @@ input::placeholder { color: #9aa4b2; }
   background: var(--field-2);
 }
 
-.history-item:hover { background: var(--accent-soft); border-color: #eccfcf; }
+.history-item:hover { background: var(--accent-soft); border-color: var(--accent-line); }
 .history-item .top { display: flex; justify-content: space-between; gap: var(--sp-1); align-items: center; }
 .history-item .time { font-size: var(--fs-tiny); color: var(--muted); font-variant-numeric: tabular-nums; }
 .history-item .sub { font-size: var(--fs-tiny); color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }

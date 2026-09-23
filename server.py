@@ -56,7 +56,7 @@ DEFAULT_OUTPUT_DIR = ROOT / "exports"
 APP_SLUG = "jingwei"
 APP_NAME = "精卫"
 APP_NAME_EN = "Jingwei"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 DEFAULT_PORT = core.PORT_MAP["jingwei"]  # 8786
 
 #: 参数上下限（SERIES-SPEC §7 / S5）

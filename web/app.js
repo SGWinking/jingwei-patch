@@ -587,7 +587,32 @@
 
   window.addEventListener("resize", () => { if (pairReady()) zoomFit(); });
 
+  /* ============================================================ 深浅主题 */
+
+  const THEME_KEY = "jingwei-theme";
+
+  function applyTheme(value) {
+    const dark = value === "dark";
+    document.body.classList.toggle("dark", dark);
+    const btn = $("themeToggle");
+    if (btn) btn.textContent = dark ? "浅色" : "深色";
+    try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* 忽略 */ }
+    applyTheme(saved === "dark" ? "dark" : "light");
+    const btn = $("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", () =>
+        applyTheme(document.body.classList.contains("dark") ? "light" : "dark"));
+    }
+  }
+
   /* ============================================================ 初始化 */
+
+  initTheme();
 
   (async () => {
     refreshHealth();
