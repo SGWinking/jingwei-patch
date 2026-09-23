@@ -3,6 +3,7 @@
 # 规范见 SERIES-SPEC v1.0 §1.2。
 
 # ---- 运行产物 ----
+_tmp_upload/
 runs/
 pair_sessions/
 exports/

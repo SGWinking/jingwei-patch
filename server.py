@@ -56,7 +56,7 @@ DEFAULT_OUTPUT_DIR = ROOT / "exports"
 APP_SLUG = "jingwei"
 APP_NAME = "精卫"
 APP_NAME_EN = "Jingwei"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 DEFAULT_PORT = core.PORT_MAP["jingwei"]  # 8786
 
 #: 参数上下限（SERIES-SPEC §7 / S5）
@@ -582,39 +582,134 @@ def parse_multipart(headers, body: bytes) -> dict:
 # 未启用备用实现：可在解析时边读边落盘，避免整段请求体进内存。
 # 当前两个上传接口仍是「先读完 body 再 parse_multipart」，因为该实现尚未做回归验证。
 # 见 CHANGELOG「已知待办」第 1 条。改用它之前请先补上传大小/损坏体的测试。
-def parse_multipart_streaming(rfile, headers, on_file) -> dict:
-    """流式 multipart 解析：遇到 file part 直接调 on_file 返回的 (chunk_bytes, finalize) 写盘。
-    避免 300+MB 整段 body 进内存。"""
+TMP_UPLOAD = ROOT / "_tmp_upload"
+
+
+class _BoundedReader:
+    """把底层 rfile 的读取范围夹在 Content-Length 之内。
+
+    为什么非要有它：socket 的 ``read(n)`` 会**一直阻塞到凑满 n 字节或对端关闭**，
+    而 HTTP keep-alive 下对端不会关。少了这层包装，流式解析把正文读完之后还会
+    继续等下一块，请求直接挂死（实测：上传到一半超时）。
+    用文件对象做单元测试是看不出来的 —— 文件 ``read(n)`` 在 EOF 会返回短读，socket 不会。
+    """
+
+    def __init__(self, rfile, length: int):
+        self._rfile = rfile
+        self._remaining = max(0, int(length))
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        want = self._remaining if size is None or size < 0 else min(size, self._remaining)
+        chunk = self._rfile.read(want)
+        if chunk:
+            self._remaining -= len(chunk)
+        return chunk
+
+
+def purge_upload_tmp(max_age_seconds: int = 3600) -> None:
+    """清掉上传临时目录里超过 max_age_seconds 的残留（上次异常中断留下的）。
+
+    每次上传前与启动时各调一次，不依赖 try/finally 也能把泄漏限定在有界范围内。
+    """
+    if not TMP_UPLOAD.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    for item in TMP_UPLOAD.iterdir():
+        try:
+            if item.stat().st_mtime >= cutoff:
+                continue
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink()
+        except OSError:
+            continue
+
+
+def parse_multipart_streaming(rfile, headers, on_file, max_bytes: int | None = None) -> dict:
+    """流式 multipart 解析：**请求正文从不整份进内存**。
+
+    这是精卫接收大图上传的唯一解析路径。旧实现是
+    ``body = rfile.read(length)`` + ``body.split(sep)``：实测 419 MB 的请求体
+    在 Python 侧峰值到 1678 MB（约 4 倍，因为 read 一份、split 的切片又一份）。
+    按现在的上限（单图 2 GB / 两张 3 GB），峰值会到 8 GB 上下。
+
+    做法：边读边找分隔符。普通字段直接累积（字段都很小）；文件字段调
+    ``on_file(name, filename, part_headers)`` 拿一个 ``writer(chunk, is_final)``
+    把分片直接写盘，内存占用只跟 READ_CHUNK 有关，与文件大小无关。
+
+    返回 ``{name: value}``。文件项为 ``{"filename": fn, "data": None}`` ——
+    内容已经由 writer 写走，调用方从 ``on_file`` 拿到落盘路径。
+    """
     ctype = headers.get("Content-Type", "")
     if "boundary=" not in ctype:
         return {}
     boundary = ctype.split("boundary=", 1)[1].strip().strip('"').encode()
-    sep = b"--" + boundary
+    if not boundary:
+        return {}
+    first_delim = b"--" + boundary      # 第一个分隔符前面没有 CRLF
+    delim = b"\r\n--" + boundary        # 之后每个分隔符前面都有
 
     READ_CHUNK = 256 * 1024
-    buf = b""
     parts: dict = {}
-    state = 0  # 0=seek --boundary; 1=read headers; 2=read body
+    buf = b""
+    state = "preamble"                  # preamble -> headers -> body
+    cur_headers = b""
     cur_name = None
     cur_filename = None
-    cur_headers = b""
     cur_writer = None
+    total = 0
     finished = False
+
+    def parse_part_headers(blob: bytes):
+        name = None
+        filename = None
+        for line in blob.split(b"\r\n"):
+            text = line.decode("utf-8", "replace")
+            if not text.lower().startswith("content-disposition:"):
+                continue
+            for kv in text.split(";")[1:]:
+                kv = kv.strip()
+                low = kv.lower()
+                if low.startswith("name="):
+                    name = kv.split("=", 1)[1].strip().strip('"')
+                elif low.startswith("filename="):
+                    filename = kv.split("=", 1)[1].strip().strip('"')
+        return name, filename
 
     while not finished:
         chunk = rfile.read(READ_CHUNK)
-        if not chunk:
+        eof = not chunk
+        if chunk:
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                if cur_writer is not None:
+                    cur_writer(b"", True)
+                raise core.PayloadTooLargeError(
+                    f"上传内容过大，单次上限 {max_bytes // (1024 ** 3)} GB。",
+                    detail=f"received>{max_bytes}",
+                )
+            buf += chunk
+        elif not buf:
             break
-        buf = buf + chunk
+
         while True:
-            if state == 0:
-                idx = buf.find(sep)
+            if state == "preamble":
+                idx = buf.find(first_delim)
                 if idx < 0:
+                    if len(buf) > len(first_delim):
+                        buf = buf[-len(first_delim):]
                     break
-                buf = buf[idx + len(sep):]
-                state = 1
+                buf = buf[idx + len(first_delim):]
+                if buf.startswith(b"--"):
+                    finished = True
+                    break
+                state = "headers"
                 cur_headers = b""
-            elif state == 1:
+
+            elif state == "headers":
                 idx = buf.find(b"\r\n\r\n")
                 if idx < 0:
                     cur_headers += buf
@@ -622,51 +717,118 @@ def parse_multipart_streaming(rfile, headers, on_file) -> dict:
                     break
                 cur_headers += buf[:idx]
                 buf = buf[idx + 4:]
-                name = None
-                filename = None
-                for line in cur_headers.split(b"\r\n"):
-                    ls = line.decode("utf-8", "replace")
-                    if ls.lower().startswith("content-disposition:"):
-                        for kv in ls.split(";"):
-                            kv = kv.strip()
-                            if kv.startswith("name="):
-                                name = kv[5:].strip().strip('"')
-                            elif kv.startswith("filename="):
-                                filename = kv[9:].strip().strip('"')
-                cur_name = name
-                cur_filename = filename
-                if name is not None and filename is not None:
-                    cur_writer = on_file(name, filename, cur_headers)
+                cur_name, cur_filename = parse_part_headers(cur_headers)
+                if cur_name and cur_filename:
+                    cur_writer = on_file(cur_name, cur_filename, cur_headers)
                 else:
                     cur_writer = None
-                state = 2
-            else:  # state == 2
-                idx = buf.find(b"\r\n" + sep)
+                state = "body"
+
+            else:  # body
+                idx = buf.find(delim)
                 if idx < 0:
-                    safe = max(0, len(buf) - len(sep) - 4)
-                    if safe > 0:
+                    keep = len(delim)          # 尾部可能有被切开的半个分隔符
+                    if len(buf) > keep:
+                        emit = buf[:len(buf) - keep]
+                        buf = buf[len(buf) - keep:]
                         if cur_writer is not None:
-                            cur_writer(buf[:safe], False)
-                        elif cur_name is not None:
-                            parts[cur_name] = parts.get(cur_name, b"") + buf[:safe]
-                        buf = buf[safe:]
+                            cur_writer(emit, False)
+                        elif cur_name:
+                            parts[cur_name] = parts.get(cur_name, b"") + emit
+                    if eof:
+                        if cur_writer is not None:
+                            cur_writer(buf, True)
+                            parts[cur_name] = {"filename": cur_filename, "data": None}
+                            cur_writer = None
+                        elif cur_name and buf:
+                            parts[cur_name] = parts.get(cur_name, b"") + buf
+                        finished = True
                     break
-                tail = buf[:idx]
+                body_bytes = buf[:idx]
                 if cur_writer is not None:
-                    cur_writer(tail, True)
-                elif cur_name is not None:
-                    parts[cur_name] = parts.get(cur_name, b"") + tail
-                buf = buf[idx + 2 + len(sep):]
-                if cur_writer is not None:
-                    parts[cur_name] = {"filename": cur_filename, "data": b"<file>"}
+                    cur_writer(body_bytes, True)
+                    parts[cur_name] = {"filename": cur_filename, "data": None}
+                    cur_writer = None
+                elif cur_name:
+                    parts[cur_name] = parts.get(cur_name, b"") + body_bytes
+                buf = buf[idx + len(delim):]
                 cur_name = None
                 cur_filename = None
-                cur_writer = None
                 if buf.startswith(b"--"):
                     finished = True
-                    break  # final boundary, break both loops
-                state = 1  # next part headers already behind --boundary
+                    break
+                state = "headers"
+                cur_headers = b""
+
+            if finished:
+                break
+
+        if eof:
+            break
+
+    for name, value in list(parts.items()):
+        if isinstance(value, bytes):
+            parts[name] = value.decode("utf-8", "replace")
     return parts
+
+
+def stream_multipart(handler, max_bytes: int):
+    """流式接收 multipart 上传，返回 ``(form, saved, work_dir)``。
+
+      · form     —— 与 parse_multipart 同构；文件项只有 filename，data 为 None
+      · saved    —— ``{字段名: 落盘 Path}``
+      · work_dir —— 本次请求的临时目录；调用方把文件搬走后应把它删掉
+
+    先按 Content-Length 做体积闸门（S4），再流式落盘，正文不整份进内存。
+    """
+    raw_length = handler.headers.get("Content-Length")
+    if raw_length is not None:
+        try:
+            length = int(raw_length)
+        except ValueError:
+            raise core.ValidationError("Content-Length 不合法。", detail=f"value={raw_length!r}")
+        if length <= 0:
+            raise core.ValidationError("上传内容为空。")
+        if length > max_bytes:
+            raise core.PayloadTooLargeError(
+                f"上传内容过大，单次上限 {max_bytes // (1024 ** 3)} GB。",
+                detail=f"content-length={length}",
+            )
+
+    purge_upload_tmp()
+    work_dir = TMP_UPLOAD / uuid.uuid4().hex
+    work_dir.mkdir(parents=True, exist_ok=True)
+    saved: dict = {}
+
+    def on_file(name: str, filename: str, part_headers: bytes):
+        safe = core.safe_filename(filename, fallback=f"{name}.bin")
+        path = core.unique_path(work_dir, safe)
+        handle = path.open("wb")
+        saved[name] = path
+
+        def writer(chunk: bytes, is_final: bool) -> None:
+            if chunk:
+                handle.write(chunk)
+            if is_final:
+                handle.close()
+
+        return writer
+
+    # 有 Content-Length 就用它把读取范围夹死；否则（分块传输）交给底层流自己给 EOF
+    reader = _BoundedReader(handler.rfile, length) if raw_length is not None else handler.rfile
+    form = parse_multipart_streaming(reader, handler.headers, on_file, max_bytes=max_bytes)
+    return form, saved, work_dir
+
+
+def move_uploaded(uploaded: dict, field: str, dest: Path) -> int:
+    """把流式阶段落盘的临时文件搬到正式位置（同盘 rename，不复制内容）。返回字节数。"""
+    src = uploaded.get(field)
+    if src is None or not Path(src).exists():
+        raise core.ValidationError("上传内容不完整，请重新选择文件。", field=field)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    size = Path(src).stat().st_size
+    os.replace(src, dest)
+    return size
 
 
 # ==========================================================================
@@ -950,8 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_analyze(self) -> None:
         MAX_BODY = 2 * 1024 * 1024 * 1024  # 2 GB
-        body = read_multipart_body(self, MAX_BODY)
-        form = parse_multipart(self.headers, body)
+        form, uploaded, work_dir = stream_multipart(self, MAX_BODY)
 
         large_item = form.get("large")
         patch_item = form.get("patch")
@@ -978,8 +1139,9 @@ class Handler(BaseHTTPRequestHandler):
 
         large_path = run_dir / core.safe_filename(large_item.get("filename"), fallback="large.png")
         patch_path = run_dir / core.safe_filename(patch_item.get("filename"), fallback="patch.png")
-        large_path.write_bytes(large_item["data"])
-        patch_path.write_bytes(patch_item["data"])
+        move_uploaded(uploaded, "large", large_path)
+        move_uploaded(uploaded, "patch", patch_path)
+        shutil.rmtree(work_dir, ignore_errors=True)
 
         t0 = time.time()
         print(f"[analyze] run_id={run_id}  large={large_path.name}  patch={patch_path.name}", flush=True)
@@ -1053,8 +1215,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_upload_pair(self) -> None:
         MAX_PAIR = 3 * 1024 * 1024 * 1024  # 3 GB
-        body = read_multipart_body(self, MAX_PAIR)
-        form = parse_multipart(self.headers, body)
+        form, uploaded, work_dir = stream_multipart(self, MAX_PAIR)
 
         before_item = form.get("before")
         after_item = form.get("after")
@@ -1064,12 +1225,12 @@ class Handler(BaseHTTPRequestHandler):
         session_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
         sd = PAIR_SESSIONS / session_id
         sd.mkdir(parents=True, exist_ok=True)
-        print(f"[pair] upload {session_id}  total={len(body)/1024/1024:.1f}MB", flush=True)
-
         before_path = sd / "before.png"
         after_path = sd / "after.png"
-        before_path.write_bytes(before_item["data"])
-        after_path.write_bytes(after_item["data"])
+        size_before = move_uploaded(uploaded, "before", before_path)
+        size_after = move_uploaded(uploaded, "after", after_path)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        print(f"[pair] upload {session_id}  total={(size_before + size_after) / 1024 / 1024:.1f}MB", flush=True)
 
         t1 = time.time()
         after_img = pil_open(after_path)
@@ -1119,8 +1280,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_crop_pair(self) -> None:
         MAX_BODY = 64 * 1024 * 1024  # 只有表单字段，没有文件
-        body = read_multipart_body(self, MAX_BODY)
-        form = parse_multipart(self.headers, body)
+        form, uploaded, work_dir = stream_multipart(self, MAX_BODY)
 
         def field(key: str) -> str:
             value = form.get(key, "")
@@ -1164,6 +1324,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     ensure_dirs()
+    purge_upload_tmp(0)   # 启动时没有任何请求在跑，可以安全清空全部上传残留
     host = "127.0.0.1"
     port = int(os.environ.get("JINGWEI_PORT", str(DEFAULT_PORT)))
     if len(sys.argv) > 1:

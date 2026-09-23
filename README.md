@@ -1,6 +1,6 @@
 # 精卫 · Jingwei / 局部修复回贴工具
 
-**Version:** `1.2.0`
+**Version:** `1.2.1`
 
 <img src="assets/logo.svg" alt="精卫 Jingwei logo" width="120">
 
