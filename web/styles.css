@@ -388,6 +388,7 @@ input::placeholder { color: #9aa4b2; }
   gap: 3px;
 }
 
+.drop:hover { border-color: var(--accent-line); }
 .drop.drag { border-color: var(--accent); background: var(--accent-soft); }
 .drop.has-file { border-style: solid; background: var(--field); }
 
